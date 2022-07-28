@@ -115,6 +115,8 @@ def parse_PDB_biounits(x, atoms=['N','CA','C'], chain=None):
   except TypeError:
       return 'no_chain', 'no_chain'
 
+### calling signature
+# pdb_dict_list = parse_PDB(pdb_path, input_chain_list=chain_list)
 def parse_PDB(path_to_pdb, input_chain_list=None):
     c=0
     pdb_dict_list = []
@@ -127,6 +129,7 @@ def parse_PDB(path_to_pdb, input_chain_list=None):
  
 
     biounit_names = [path_to_pdb]
+    # Each of the biounits is a separate PDB file, so for running with a single PDB file like from colab, this loop will be executed only once
     for biounit in biounit_names:
         my_dict = {}
         s = 0
@@ -136,7 +139,8 @@ def parse_PDB(path_to_pdb, input_chain_list=None):
         concat_C = []
         concat_O = []
         concat_mask = []
-        coords_dict = {}
+        coords_dict = {} 
+        # This loop will be executed only once for single chain DDG type cases
         for letter in chain_alphabet:
             xyz, seq = parse_PDB_biounits(biounit, atoms=['N','CA','C','O'], chain=letter)
             if type(xyz) != str:
@@ -159,7 +163,8 @@ def parse_PDB(path_to_pdb, input_chain_list=None):
     return pdb_dict_list
 
 
-
+# X, S, mask, lengths, chain_M, chain_encoding_all, chain_list_list, visible_list_list, masked_list_list, masked_chain_length_list_list, chain_M_pos, omit_AA_mask, residue_idx, dihedral_mask, tied_pos_list_of_lists_list, pssm_coef, pssm_bias, pssm_log_odds_all, bias_by_res_all, tied_beta 
+# = tied_featurize(batch_clones, device, chain_id_dict, fixed_positions_dict, omit_AA_dict, tied_positions_dict, pssm_dict, bias_by_res_dict)
 def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_dict=None, tied_positions_dict=None, pssm_dict=None, bias_by_res_dict=None):
     """ Pack and pad batch into torch tensors """
     alphabet = 'ACDEFGHIKLMNPQRSTVWYX'
@@ -415,6 +420,9 @@ def loss_smoothed(S, log_probs, mask, weight=0.1):
     loss_av = torch.sum(loss * mask) / torch.sum(mask)
     return loss, loss_av
 
+# Objects of this class can be indexed since dunder methods __len()__ and __getitem()__ have been implemented, which 
+# indexes a list that has been declared as an instance variable in the constructor,
+# and each element of that underlying list is a dictionary containing information regarding a specific sequence
 class StructureDataset():
     def __init__(self, jsonl_file, verbose=True, truncate=None, max_length=100,
         alphabet='ACDEFGHIKLMNPQRSTVWYX-'):
@@ -469,6 +477,10 @@ class StructureDataset():
         return self.data[idx]
     
 
+# Objects of this class can be indexed since dunder methods __len()__ and __getitem()__ have been implemented, which 
+# indexes a list that has been declared as an instance variable in the constructor,
+# and each element of that underlying list is a dictionary containing information regarding a specific structure,
+# seems like a structure-specific version of the above method which deals with sequences 
 class StructureDatasetPDB():
     def __init__(self, pdb_dict_list, verbose=True, truncate=None, max_length=100,
         alphabet='ACDEFGHIKLMNPQRSTVWYX-'):
@@ -482,6 +494,7 @@ class StructureDatasetPDB():
         self.data = []
 
         start = time.time()
+        # elements of pdb_dict_list are dictionaries containing information regarding a specific pdb file
         for i, entry in enumerate(pdb_dict_list):
             seq = entry['seq']
             name = entry['name']
