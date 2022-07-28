@@ -822,6 +822,10 @@ class ProteinMPNN(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
+    # Creating my own versions of forward should be an easy way to get embeddings or attention weights from diffrerent layers of the model
+    # See here (https://discuss.pytorch.org/t/how-can-i-extract-intermediate-layer-output-from-loaded-cnn-model/77301) in the forums for adding forward
+    # hooks or manipulating the forward method
+    # but my easy solution would be to create different versions of the forward method with different namaes, and calling them explicitly
     def forward(self, X, S, mask, chain_M, residue_idx, chain_encoding_all, randn, use_input_decoding_order=False, decoding_order=None):
         """ Graph-conditioned sequence model """
         device=X.device
