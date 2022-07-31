@@ -816,6 +816,7 @@ class ProteinMPNN(nn.Module):
         self.features = ProteinFeatures(node_features, edge_features, top_k=k_neighbors, augment_eps=augment_eps)
 
         self.W_e = nn.Linear(edge_features, hidden_dim, bias=True)
+        # This W_s is for embedding the sequence
         self.W_s = nn.Embedding(vocab, hidden_dim)
 
         # Encoder layers
@@ -839,6 +840,7 @@ class ProteinMPNN(nn.Module):
     # See here (https://discuss.pytorch.org/t/how-can-i-extract-intermediate-layer-output-from-loaded-cnn-model/77301) in the forums for adding forward
     # hooks or manipulating the forward method
     # but my easy solution would be to create different versions of the forward method with different namaes, and calling them explicitly
+    # "chain_M" and "mask" seem to be the things that I need to understand very well and play-around with 
     def forward(self, X, S, mask, chain_M, residue_idx, chain_encoding_all, randn, use_input_decoding_order=False, decoding_order=None):
         """ Graph-conditioned sequence model """
         device=X.device
@@ -854,6 +856,7 @@ class ProteinMPNN(nn.Module):
             h_V, h_E = layer(h_V, h_E, E_idx, mask, mask_attend)
 
         # Concatenate sequence embeddings for autoregressive decoder
+        # h_S denotes embedding of the sequence itself for use in decoder
         h_S = self.W_s(S)
         h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
 
@@ -881,6 +884,8 @@ class ProteinMPNN(nn.Module):
             h_V = layer(h_V, h_ESV, mask)
 
         logits = self.W_out(h_V)
+        # The probabilities are passed through log() function so that the sequences can be ranked based by summing the respective values 
+        # for each position instead of multiplication 
         log_probs = F.log_softmax(logits, dim=-1)
         return log_probs
 
