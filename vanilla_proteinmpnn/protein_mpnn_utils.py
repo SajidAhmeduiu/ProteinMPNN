@@ -702,6 +702,9 @@ class PositionalEncodings(nn.Module):
         E = self.linear(d_onehot.float())
         return E
 
+# Does not look like this function needs to be modified for now to use the model as sort of an energy function
+# The only thing that could do something is "top_k", which can be changed for considering more or less neighbors
+# for each of the nodes, but that too I think does not matter if the default value of top_k is updated by parameter passing
 class ProteinFeatures(nn.Module):
     def __init__(self, edge_features, node_features, num_positional_embeddings=16,
         num_rbf=16, top_k=30, augment_eps=0., num_chain_embeddings=16):
@@ -891,6 +894,9 @@ class ProteinMPNN(nn.Module):
 
 
 
+    # Seems like this is the method which is used by the notebook for calculating probabilites and scoring
+    # Need to dig into it thoroughly
+    # "chain_mask" and "residue_idx" seem like the tensors of interest
     def sample(self, X, randn, S_true, chain_mask, chain_encoding_all, residue_idx, mask=None, temperature=1.0, omit_AAs_np=None, bias_AAs_np=None, chain_M_pos=None, omit_AA_mask=None, pssm_coef=None, pssm_bias=None, pssm_multi=None, pssm_log_odds_flag=None, pssm_log_odds_mask=None, pssm_bias_flag=None, bias_by_res=None):
         device = X.device
         # Prepare node and edge embeddings
@@ -1077,6 +1083,10 @@ class ProteinMPNN(nn.Module):
         return output_dict
 
 
+    # I am not seeing an immediate use of this method when the model is called through notebook
+    # So, will skip further commenting and digging for now
+    # But, seems like an interesting way of interacting with the model in a specific way, so
+    # might get back to this later
     def conditional_probs(self, X, S, mask, chain_M, residue_idx, chain_encoding_all, randn, backbone_only=False):
         """ Graph-conditioned sequence model """
         device=X.device
@@ -1137,6 +1147,10 @@ class ProteinMPNN(nn.Module):
         return log_conditional_probs
 
 
+    # I am not seeing an immediate use of this method when the model is called through notebook
+    # So, will skip further commenting and digging for now
+    # But, seems like an interesting way of interacting with the model in a specific way, so
+    # might get back to this later
     def unconditional_probs(self, X, mask, residue_idx, chain_encoding_all):
         """ Graph-conditioned sequence model """
         device=X.device
