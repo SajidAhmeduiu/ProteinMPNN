@@ -165,6 +165,8 @@ def parse_PDB(path_to_pdb, input_chain_list=None):
 
 # X, S, mask, lengths, chain_M, chain_encoding_all, chain_list_list, visible_list_list, masked_list_list, masked_chain_length_list_list, chain_M_pos, omit_AA_mask, residue_idx, dihedral_mask, tied_pos_list_of_lists_list, pssm_coef, pssm_bias, pssm_log_odds_all, bias_by_res_all, tied_beta 
 # = tied_featurize(batch_clones, device, chain_id_dict, fixed_positions_dict, omit_AA_dict, tied_positions_dict, pssm_dict, bias_by_res_dict)
+# fixed_pos_list = fixed_position_dict[b['name']][letter]
+# The trick will be to populate this fixed_position_dict from the calling function, and 
 def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_dict=None, tied_positions_dict=None, pssm_dict=None, bias_by_res_dict=None):
     """ Pack and pad batch into torch tensors """
     alphabet = 'ACDEFGHIKLMNPQRSTVWYX'
@@ -173,12 +175,24 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
     L_max = max([len(b['seq']) for b in batch])
     X = np.zeros([B, L_max, 4, 3])
     residue_idx = -100*np.ones([B, L_max], dtype=np.int32)
+    # This "chain_M" is the variable of interest for controlling which positions will be fixed vs. which will be designed
+    # For scoring function-based uses, I intend on sending the sequences one by one for not caring about the slow speed
+    # Therefore, B will be == 1
+    # So, for now, I just need to somehow manipulate the indexes corresponding to L_max which will be equal to the length of the single sequence as a consequence
     chain_M = np.zeros([B, L_max], dtype=np.int32) #1.0 for the bits that need to be predicted
     pssm_coef_all = np.zeros([B, L_max], dtype=np.float32) #1.0 for the bits that need to be predicted
     pssm_bias_all = np.zeros([B, L_max, 21], dtype=np.float32) #1.0 for the bits that need to be predicted
     pssm_log_odds_all = 10000.0*np.ones([B, L_max, 21], dtype=np.float32) #1.0 for the bits that need to be predicted
+    # This "chain_M_pos" is the variable of interest for controlling which positions will be fixed vs. which will be designed
+    # For scoring function-based uses, I intend on sending the sequences one by one for not caring about the slow speed
+    # Therefore, B will be == 1
+    # So, for now, I just need to somehow manipulate the indexes corresponding to L_max which will be equal to the length of single sequence as a consequence
     chain_M_pos = np.zeros([B, L_max], dtype=np.int32) #1.0 for the bits that need to be predicted
     bias_by_res_all = np.zeros([B, L_max, 21], dtype=np.float32)
+    # This "chain_encoding_all" is the variable of interest for controlling which positions will be fixed vs. which will be designed
+    # For scoring function-based uses, I intend on sending the sequences one by one for not caring about the slow speed
+    # Therefore, B will be == 1
+    # So, for now, I just need to somehow manipulate the indexes corresponding to L_max which will be equal to the length of single sequence as a consequence
     chain_encoding_all = np.zeros([B, L_max], dtype=np.int32) #1.0 for the bits that need to be predicted
     S = np.zeros([B, L_max], dtype=np.int32)
     omit_AA_mask = np.zeros([B, L_max, len(alphabet)], dtype=np.int32)
@@ -190,7 +204,11 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
     tied_pos_list_of_lists_list = []
     #shuffle all chains before the main loop
     for i, b in enumerate(batch):
+        # for my current energy function like usecase, the code will reach "if and not else" because chain_dict will not be None
         if chain_dict != None:
+            ### Calling function argument assignment START
+            # chain_id_dict[pdb_dict_list[0]['name']] = (designed_chain_list, fixed_chain_list)
+            ### Calling function argument assignment END
             masked_chains, visible_chains = chain_dict[b['name']] #masked_chains a list of chain letters to predict [A, D, F]
         else:
             masked_chains = [item[-1:] for item in list(b) if item[:10]=='seq_chain_']
@@ -198,17 +216,22 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
         num_chains = b['num_of_chains']
         all_chains = masked_chains + visible_chains
         #random.shuffle(all_chains)
+    # This for loop can be ignored since it will be executed only once in my single-chain or single-chain-at-a-time implementation
     for i, b in enumerate(batch):
         mask_dict = {}
         a = 0
         x_chain_list = []
         chain_mask_list = []
+        # "chain_seq_list" will contain string format sequences of all the chains both fixed and designable 
         chain_seq_list = []
         chain_encoding_list = []
         c = 1
+        # "letter_list" will contain names of all the chains both fixed and designable
         letter_list = []
         global_idx_start_list = [0]
+        # "visible_list" will contain names of the fixed chains 
         visible_list = []
+        # "masked_list" will contain names of the designable chains
         masked_list = []
         masked_chain_length_list = []
         fixed_position_mask_list = []
@@ -219,6 +242,9 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
         bias_by_res_list = []
         l0 = 0
         l1 = 0
+        # This loop will also be executed once for my single chain case,
+        # and since the same chain has both designable and fixed positions, the codes insides both of the if 
+        # statements will be executed
         for step, letter in enumerate(all_chains):
             if letter in visible_chains:
                 letter_list.append(letter)
@@ -228,16 +254,24 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
                 chain_length = len(chain_seq)
                 global_idx_start_list.append(global_idx_start_list[-1]+chain_length)
                 chain_coords = b[f'coords_chain_{letter}'] #this is a dictionary
+                # the "chain_mask" varies between fixed and designable chains (1.0 for designable chains which are maxed)
                 chain_mask = np.zeros(chain_length) #0.0 for visible chains
                 x_chain = np.stack([chain_coords[c] for c in [f'N_chain_{letter}', f'CA_chain_{letter}', f'C_chain_{letter}', f'O_chain_{letter}']], 1) #[chain_lenght,4,3]
                 x_chain_list.append(x_chain)
                 chain_mask_list.append(chain_mask)
                 chain_seq_list.append(chain_seq)
                 chain_encoding_list.append(c*np.ones(np.array(chain_mask).shape[0]))
+                # l0 points at the starting of the current chain and l1 points after the ending of the current chain
                 l1 += chain_length
+                # the only value i will have is 0 since it will be executed only once in my single-chain or single-chain-at-a-time implementation
+                # seems like the chains are separated by  
                 residue_idx[i, l0:l1] = 100*(c-1)+np.arange(l0, l1)
                 l0 += chain_length
                 c+=1
+                # The following variables are numpy arrays with entries corresponding to every position in the sequence
+                # appending these numpy arrays to a list indicates that the chains are added one after one
+                # same thing goes for the chain_mask and chain_seq variables declared above
+                ### START
                 fixed_position_mask = np.ones(chain_length)
                 fixed_position_mask_list.append(fixed_position_mask)
                 omit_AA_mask_temp = np.zeros([chain_length, len(alphabet)], np.int32)
@@ -249,6 +283,7 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
                 pssm_bias_list.append(pssm_bias)
                 pssm_log_odds_list.append(pssm_log_odds)
                 bias_by_res_list.append(np.zeros([chain_length, 21]))
+                ### END
             if letter in masked_chains:
                 masked_list.append(letter)
                 letter_list.append(letter)
@@ -272,9 +307,11 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
                 if fixed_position_dict!=None:
                     fixed_pos_list = fixed_position_dict[b['name']][letter]
                     if fixed_pos_list:
+                        # seems like "fixed_pos_list"  can be an 1-indexed integer list corresponding to positions in "chain_seq"
                         fixed_position_mask[np.array(fixed_pos_list)-1] = 0.0
                 fixed_position_mask_list.append(fixed_position_mask)
                 omit_AA_mask_temp = np.zeros([chain_length, len(alphabet)], np.int32)
+                # For my current energy function like usecase, "omit_AA_dict" will be None, so the following loop can be ignored
                 if omit_AA_dict!=None:
                     for item in omit_AA_dict[b['name']][letter]:
                         idx_AA = np.array(item[0])-1
@@ -397,7 +434,7 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
     return X, S, mask, lengths, chain_M, chain_encoding_all, letter_list_list, visible_list_list, masked_list_list, masked_chain_length_list_list, chain_M_pos, omit_AA_mask, residue_idx, dihedral_mask, tied_pos_list_of_lists_list, pssm_coef_all, pssm_bias_all, pssm_log_odds_all, bias_by_res_all, tied_beta
 
 
-
+# No need to dig into this loss function for now
 def loss_nll(S, log_probs, mask):
     """ Negative log probabilities """
     criterion = torch.nn.NLLLoss(reduction='none')
@@ -407,7 +444,7 @@ def loss_nll(S, log_probs, mask):
     loss_av = torch.sum(loss * mask) / torch.sum(mask)
     return loss, loss_av
 
-
+# No need to dig into this label smoothing stuff for now
 def loss_smoothed(S, log_probs, mask, weight=0.1):
     """ Negative log probabilities """
     S_onehot = torch.nn.functional.one_hot(S, 21).float()
