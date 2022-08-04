@@ -22,6 +22,7 @@ def _scores(S, log_probs, mask):
         log_probs.contiguous().view(-1,log_probs.size(-1)),
         S.contiguous().view(-1)
     ).view(S.size())
+    # The designable positions have mask set to 1.0, so this function seems to be returning the average score for the designable positions
     scores = torch.sum(loss * mask, dim=-1) / torch.sum(mask, dim=-1)
     return scores
 
@@ -260,6 +261,9 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
                 x_chain_list.append(x_chain)
                 chain_mask_list.append(chain_mask)
                 chain_seq_list.append(chain_seq)
+                # "chain_encoding_list" contains numpy arrays corresponding to chains (each array corresponds to one chain),
+                # where all elements of the same array is the same value, which is equal to the index of the chain the it corresponds to
+                # by index, I mean index of the different numpy arrays annotating the chains
                 chain_encoding_list.append(c*np.ones(np.array(chain_mask).shape[0]))
                 # l0 points at the starting of the current chain and l1 points after the ending of the current chain
                 l1 += chain_length
@@ -271,9 +275,15 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
                 # The following variables are numpy arrays with entries corresponding to every position in the sequence
                 # appending these numpy arrays to a list indicates that the chains are added one after one
                 # same thing goes for the chain_mask and chain_seq variables declared above
+                # In code-block below in this cell, these lists of numpy arrays are going through np.concatenate(), which is creating
+                # the final numpy arrays containing co-ordinates, sequence identity, fixed position, masked position, PSSM bias, and everything
+                # required to pass the sequences through the model
                 ### START
                 fixed_position_mask = np.ones(chain_length)
                 fixed_position_mask_list.append(fixed_position_mask)
+                # The omit_AA_mask, pssm_coef, pssm_bias, "bias_by_res_list", all these numpy arrays are zero for the fixed positions
+                # since these positions are used as it is, while for the masked_positions, these values can get activated
+                # which is why the next if statement has several extra lines manipulating these variables according to the amount of information passed 
                 omit_AA_mask_temp = np.zeros([chain_length, len(alphabet)], np.int32)
                 omit_AA_mask_list.append(omit_AA_mask_temp)
                 pssm_coef = np.zeros(chain_length)
@@ -308,6 +318,8 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
                     fixed_pos_list = fixed_position_dict[b['name']][letter]
                     if fixed_pos_list:
                         # seems like "fixed_pos_list"  can be an 1-indexed integer list corresponding to positions in "chain_seq"
+                        # this thing ultimately controls which positions in the designable chain will be masked, which is why the fixed 
+                        # positions are set to 0.0 since those positions will not be maxed (1 if maxed, 0 if not maxed)
                         fixed_position_mask[np.array(fixed_pos_list)-1] = 0.0
                 fixed_position_mask_list.append(fixed_position_mask)
                 omit_AA_mask_temp = np.zeros([chain_length, len(alphabet)], np.int32)
@@ -335,7 +347,9 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
                 else:
                     bias_by_res_list.append(np.zeros([chain_length, 21]))
 
-       
+        ### TIED position START
+        # Since there will technically be no tied positions for my single chain energy-based usecase for now,
+        # I do not need to dig into this part of the code
         letter_list_np = np.array(letter_list)
         tied_pos_list_of_lists = []
         tied_beta = np.ones(L_max)
@@ -356,12 +370,23 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
                                 one_list.append(start_idx+v_-1)#make 0 to be the first
                     tied_pos_list_of_lists.append(one_list)
         tied_pos_list_of_lists_list.append(tied_pos_list_of_lists)
-
-
+        ### TIED position END
  
+        # Interestingly, although the backbone atom coordinates are used for generating edge features,
+        # the "x" in the following line contains the coodinates of the backbone atoms 
         x = np.concatenate(x_chain_list,0) #[L, 4, 3]
+        # "all_sequence" is a string where all the chain sequences have been put one after another
         all_sequence = "".join(chain_seq_list)
+        # This "chain_mask_list" and "m_pos" below are the variables of interest if these actually contain full information regarding the
+        # fixed vs. variable positions definitions 
+        # consequently, since these are concatenated numpy arrays of numpy arrays inside the lists "chain_mask_list" and "fixed_position_mask_list",
+        # when those lists are populated in the above code-block with binary numpy arrays "fixed_position_mask" and "fixed_position_mask" corresponding to 
+        # each of the chains,
+        # that is where all the controlling needs to be done from
         m = np.concatenate(chain_mask_list,0) #[L,], 1.0 for places that need to be predicted
+        # "chain_encoding_list" contains numpy arrays corresponding to chains (each array corresponds to one chain),
+        # where all elements of the same array is the same value, which is equal to the index of the chain the it corresponds to
+        # by index, I mean index of the different numpy arrays annotating the chains
         chain_encoding = np.concatenate(chain_encoding_list,0)
         m_pos = np.concatenate(fixed_position_mask_list,0) #[L,], 1.0 for places that need to be predicted
 
@@ -371,6 +396,12 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
 
         bias_by_res_ = np.concatenate(bias_by_res_list, 0)  #[L,21], 0.0 for places where AA frequencies don't need to be tweaked
 
+        # Interestingly, all the chains are padded to the same length
+        # this has to be done most probably because the same layers are applied to all chains
+        # but for single chain or homomer cases, this should not be an issue
+        # need to be sure later why this is done
+        # does not significant when it comes to single chain energy-based usecase
+        # PADDING START
         l = len(all_sequence)
         x_pad = np.pad(x, [[0,L_max-l], [0,0], [0,0]], 'constant', constant_values=(np.nan, ))
         X[i,:,:,:] = x_pad
@@ -395,6 +426,7 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
 
         bias_by_res_pad = np.pad(bias_by_res_, [[0,L_max-l], [0,0]], 'constant', constant_values=(0.0, ))
         bias_by_res_all[i,:] = bias_by_res_pad
+        # PADDING END
 
         # Convert to labels
         indices = np.asarray([alphabet.index(a) for a in all_sequence], dtype=np.int32)
@@ -431,6 +463,20 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
     chain_M_pos = torch.from_numpy(chain_M_pos).to(dtype=torch.float32, device=device)
     omit_AA_mask = torch.from_numpy(omit_AA_mask).to(dtype=torch.float32, device=device)
     chain_encoding_all = torch.from_numpy(chain_encoding_all).to(dtype=torch.long, device=device)
+    # in general, in this return statement, *_list_list has the list inside list format because the outer list corresponds to "batch_clones", 
+    # whereas the inner list corresponds to "chains" for each of the elements of "batch_clones"
+    # "masked_list_list" contains names of the designable chains (which is my target for single chain energy), whereas "visible_list_list" 
+    # contains names of the fixed chains (which should be empty for my single chain energy)
+    # for my single chain energy case, "letter_list_list" should be equal to "masked_list_list", and three lists should have one list for now
+    # "chain_encoding_all" should also contain chain-index related to the only single chain which should be 0 (all 0s)
+    # the last lists starting from "tied_pos_list_of_lists_list" to the end should be irrelevant for my single chain energy case
+    # but still it would be good to check the values of these irrelevant lists, and get an idea if everything makes sense or not
+    # "chain_M_pos" contains values from "fixed_position_mask" through "m_pos", which should get populated with 0.0 for fixed positions
+    # and 1.0 for designable positions, which can be controlled through the , which
+    # is controlled by "fixed_position_dict" input to this function from the running script
+    # "chain_M" is formed from "m_pad" which comes from "m" which comes from chain_mask = np.ones(chain_length) #1.0 for masked
+    # so, for my single chain energy usecase, "chain_M" should be all 1.0s with the same length as chain_M_pos
+    # I do not think "X", "S", and "mask" need to be manipulated for now 
     return X, S, mask, lengths, chain_M, chain_encoding_all, letter_list_list, visible_list_list, masked_list_list, masked_chain_length_list_list, chain_M_pos, omit_AA_mask, residue_idx, dihedral_mask, tied_pos_list_of_lists_list, pssm_coef_all, pssm_bias_all, pssm_log_odds_all, bias_by_res_all, tied_beta
 
 
