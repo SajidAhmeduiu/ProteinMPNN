@@ -27,6 +27,7 @@ def _scores(S, log_probs, mask):
     return scores
 
 def _S_to_seq(S, mask):
+    # This is the decoding order
     alphabet = 'ACDEFGHIKLMNPQRSTVWYX'
     seq = ''.join([alphabet[c] for c, m in zip(S.tolist(), mask.tolist()) if m > 0])
     return seq
@@ -43,6 +44,10 @@ def parse_PDB_biounits(x, atoms=['N','CA','C'], chain=None):
   alpha_3 = ['ALA','ARG','ASN','ASP','CYS','GLN','GLU','GLY','HIS','ILE',
              'LEU','LYS','MET','PHE','PRO','SER','THR','TRP','TYR','VAL','GAP']
   
+  # The following dictionaries are mapping from one-letter to 0-20 index,
+  # three-letter to 0-20 index,
+  # 0-20 index to one-letter,
+  # one-letter to three-letter, and vice-versa 
   aa_1_N = {a:n for n,a in enumerate(alpha_1)}
   aa_3_N = {a:n for n,a in enumerate(alpha_3)}
   aa_N_1 = {n:a for n,a in enumerate(alpha_1)}
@@ -1055,6 +1060,8 @@ class ProteinMPNN(nn.Module):
                     omit_AA_mask_gathered = torch.gather(omit_AA_mask, 1, t[:,None, None].repeat(1,1,omit_AA_mask.shape[-1]))[:,0] #[B, 21]
                     probs_masked = probs*(1.0-omit_AA_mask_gathered)
                     probs = probs_masked/torch.sum(probs_masked, dim=-1, keepdim=True) #[B, 21]
+                # Here is where sampling from the multinomial distribution is happening
+                # this will sample 1 element according to the given distribution, and return the index of that element [from 0 to 20]
                 S_t = torch.multinomial(probs, 1)
                 all_probs.scatter_(1, t[:,None,None].repeat(1,1,21), (chain_mask_gathered[:,:,None,]*probs[:,None,:]).float())
             S_true_gathered = torch.gather(S_true, 1, t[:,None])
