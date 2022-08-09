@@ -816,6 +816,8 @@ class ProteinFeatures(nn.Module):
         self.edge_embedding = nn.Linear(edge_in, edge_features, bias=False)
         self.norm_edges = nn.LayerNorm(edge_features)
 
+    # the output of this function MUST be analyzed either directly or via some other function to 
+    # understand how to get "index/position" of neighbors
     def _dist(self, X, mask, eps=1E-6):
         mask_2D = torch.unsqueeze(mask,1) * torch.unsqueeze(mask,2)
         dX = torch.unsqueeze(X,1) - torch.unsqueeze(X,2)
@@ -841,6 +843,21 @@ class ProteinFeatures(nn.Module):
         D_A_B_neighbors = gather_edges(D_A_B[:,:,:,None], E_idx)[:,:,:,0] #[B,L,K]
         RBF_A_B = self._rbf(D_A_B_neighbors)
         return RBF_A_B
+
+    # this function will be called with the arguments as forward(), but will return information regarding 
+    # the neighbors which I will figure out a way to parse
+    def return_neighbor_info(self, X, mask, residue_idx, chain_labels):
+        b = X[:,:,1,:] - X[:,:,0,:]
+        c = X[:,:,2,:] - X[:,:,1,:]
+        a = torch.cross(b, c, dim=-1)
+        Cb = -0.58273431*a + 0.56802827*b - 0.54067466*c + X[:,:,1,:]
+        Ca = X[:,:,1,:]
+        N = X[:,:,0,:]
+        C = X[:,:,2,:]
+        O = X[:,:,3,:]
+ 
+        D_neighbors, E_idx = self._dist(Ca, mask)
+
 
     def forward(self, X, mask, residue_idx, chain_labels):
         if self.augment_eps > 0:
