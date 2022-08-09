@@ -76,6 +76,10 @@ def parse_PDB_biounits(x, atoms=['N','CA','C'], chain=None):
 
     if line[:4] == "ATOM":
       ch = line[21:22]
+      # If the input chain is not in the PDB file, which can be the case if the target chains are named differently in the runner script,
+      # this line will cause the output to have literally no information, this is the case for integer named chains
+      # that does not mean that this line is not doing its job correctly, this is just a constraint that input chain names and 
+      # chain names in the PDB file have to be congruent
       if ch == chain or chain is None:
         atom = line[12:12+4].strip()
         resi = line[17:17+3]
@@ -793,6 +797,8 @@ class PositionalEncodings(nn.Module):
 # Does not look like this function needs to be modified for now to use the model as sort of an energy function
 # The only thing that could do something is "top_k", which can be changed for considering more or less neighbors
 # for each of the nodes, but that too I think does not matter if the default value of top_k is updated by parameter passing
+# This function is called from the model itself with node_features=128, edge_features=128, and top_k=48
+# ProteinFeatures(node_features, edge_features, top_k=k_neighbors, augment_eps=augment_eps)
 class ProteinFeatures(nn.Module):
     def __init__(self, edge_features, node_features, num_positional_embeddings=16,
         num_rbf=16, top_k=30, augment_eps=0., num_chain_embeddings=16):
@@ -893,6 +899,8 @@ class ProteinFeatures(nn.Module):
 
 
 class ProteinMPNN(nn.Module):
+    # "node_features" and "edge_features" are actually dimensionality of these features ("hidden_dim" in the calling script)
+    # the value is 128 for the version that I am using
     def __init__(self, num_letters, node_features, edge_features,
         hidden_dim, num_encoder_layers=3, num_decoder_layers=3,
         vocab=21, k_neighbors=64, augment_eps=0.05, dropout=0.1):
@@ -904,6 +912,7 @@ class ProteinMPNN(nn.Module):
         self.hidden_dim = hidden_dim
 
         # Featurization layers
+        # The version that I am using considers 48 neighbors for each position
         self.features = ProteinFeatures(node_features, edge_features, top_k=k_neighbors, augment_eps=augment_eps)
 
         self.W_e = nn.Linear(edge_features, hidden_dim, bias=True)
