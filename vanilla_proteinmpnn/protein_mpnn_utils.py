@@ -709,7 +709,11 @@ class EncLayer(nn.Module):
         h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
         h_EV = torch.cat([h_V_expand, h_EV], -1)
         h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
+
+        # No designable position masking is done in this layer
         if mask_attend is not None:
+            # When padding is not needed due to batches of size 1, the "mask_attend" is all one, and has nothing to do 
+            # with designable masked positions
             h_message = mask_attend.unsqueeze(-1) * h_message
         dh = torch.sum(h_message, -2) / self.scale
         h_V = self.norm1(h_V + self.dropout1(dh))
@@ -717,6 +721,8 @@ class EncLayer(nn.Module):
         dh = self.dense(h_V)
         h_V = self.norm2(h_V + self.dropout2(dh))
         if mask_V is not None:
+            # When padding is not needed due to batches of size 1, the "mask_V" is all one, and has nothing to do 
+            # with designable masked positions
             mask_V = mask_V.unsqueeze(-1)
             h_V = mask_V * h_V
 
@@ -752,8 +758,13 @@ class DecLayer(nn.Module):
         h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_E.size(-2),-1)
         h_EV = torch.cat([h_V_expand, h_E], -1)
 
+        # Maybe, length of the message vector can serve as attention
         h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
+
+        # The actual designable position masking is done before even sending the input to this layer
         if mask_attend is not None:
+            # When padding is not needed due to batches of size 1, the "mask_attend" is all one, and has nothing to do 
+            # with designable masked positions
             h_message = mask_attend.unsqueeze(-1) * h_message
         dh = torch.sum(h_message, -2) / self.scale
 
@@ -764,6 +775,8 @@ class DecLayer(nn.Module):
         h_V = self.norm2(h_V + self.dropout2(dh))
 
         if mask_V is not None:
+            # When padding is not needed due to batches of size 1, the "mask_V" is all one, and has nothing to do 
+            # with designable masked positions
             mask_V = mask_V.unsqueeze(-1)
             h_V = mask_V * h_V
         return h_V 
@@ -967,6 +980,7 @@ class ProteinMPNN(nn.Module):
         h_E = self.W_e(E)
 
         # Encoder is unmasked self-attention
+        # During encoding, only the padded positions are masked, everything else is unmasked as usual and no sequence-information is provided
         mask_attend = gather_nodes(mask.unsqueeze(-1),  E_idx).squeeze(-1)
         mask_attend = mask.unsqueeze(-1) * mask_attend
         for layer in self.encoder_layers:
@@ -981,7 +995,8 @@ class ProteinMPNN(nn.Module):
         h_EX_encoder = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, E_idx)
         h_EXV_encoder = cat_neighbors_nodes(h_V, h_EX_encoder, E_idx)
 
-
+        # "chain"_M has 0 for fixed positions, and "mask" has 0 for padded positions
+        # The position-wise multiplication below is making a position 0 if it is either "fixed" or "padded" 
         chain_M = chain_M*mask #update chain_M to include missing regions
         if not use_input_decoding_order:
             decoding_order = torch.argsort((chain_M+0.0001)*(torch.abs(randn))) #[numbers will be smaller for places where chain_M = 0.0 and higher for places where chain_M = 1.0]
@@ -997,6 +1012,8 @@ class ProteinMPNN(nn.Module):
         for layer in self.decoder_layers:
             # Masked positions attend to encoder information, unmasked see. 
             h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
+            # Finally got how masking is happening, the deignable positions are masked by "mask_bw" 
+            # even before sending sending inputs to the decoder
             h_ESV = mask_bw * h_ESV + h_EXV_encoder_fw
             h_V = layer(h_V, h_ESV, mask)
 
